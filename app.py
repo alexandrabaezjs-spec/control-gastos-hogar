@@ -71,14 +71,14 @@ try:
 
     if not df_gastos.empty:
         # Tabla interactiva con columnas bien distribuidas
+    # Tabla interactiva con anchos de columna fijos
         df_editado = st.data_editor(
             df_gastos[["Descripción", "Presupuesto contemplado", "Gasto Real"]],
-            use_container_width=True,
             disabled=["Descripción", "Presupuesto contemplado"],
             column_config={
-                "Descripción": st.column_config.TextColumn("Descripción"),
-                "Presupuesto contemplado": st.column_config.NumberColumn("Presupuesto ($)", format="$ %.0f"),
-                "Gasto Real": st.column_config.NumberColumn("Gasto Real ($)", format="$ %.0f")
+                "Descripción": st.column_config.TextColumn("Descripción", width=250),
+                "Presupuesto contemplado": st.column_config.NumberColumn("Presupuesto ($)", format="$ %.0f", width=180),
+                "Gasto Real": st.column_config.NumberColumn("Gasto Real ($)", format="$ %.0f", width=180)
             },
             hide_index=True
         )
