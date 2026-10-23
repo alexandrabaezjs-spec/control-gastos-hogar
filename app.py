@@ -1,65 +1,94 @@
 import streamlit as st
 import pandas as pd
-import os
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Bitácora Hogar", page_icon="💰", layout="centered")
 
-EXCEL_FILE = 'BITACORA HOGAR.xlsx'
-
 st.title("💰 Control de Gastos del Hogar")
 
-meses = ["Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-mes_seleccionado = st.selectbox("Selecciona el Mes:", meses)
+# Configuración de acceso a la API de Google Sheets
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
-# Función para cargar datos del Excel
-def cargar_datos(mes):
-    if os.path.exists(EXCEL_FILE):
-        try:
-            xls = pd.ExcelFile(EXCEL_FILE)
-            if mes in xls.sheet_names:
-                df = pd.read_excel(EXCEL_FILE, sheet_name=mes)
-                # Asegurar columnas esperadas
-                for col in ["Descripcion", "Presupuesto contemplado", "Gasto Real"]:
-                    if col not in df.columns:
-                        df[col] = 0.0 if "Gasto" in col or "Presupuesto" in col else ""
-                return df
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
-    # Si no existe el archivo o la pestaña, creamos un DataFrame base con los conceptos comunes
-    conceptos = ["Agua", "Gas", "Luz", "Administracion", "cuota de credito", "internet", "Neflix", "gatos", "spotify", "cuota Apartamento", "Mercado", "impuesto", "otros"]
-    return pd.DataFrame({
-        "Descripcion": conceptos,
-        "Presupuesto contemplado": [0.0] * len(conceptos),
-        "Gasto Real": [0.0] * len(conceptos)
-    })
+@st.cache_resource
+def conectar_google_sheets():
+    # Obtener credenciales desde los secretos de Streamlit Cloud
+    creds_dict = st.secrets["gcp_service_account"]
+    credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    client = gspread.authorize(credentials)
+    return client
 
-df_actual = cargar_datos(mes_seleccionado)
+try:
+    gc = conectar_google_sheets()
+    # Abre la hoja de cálculo por su nombre exacto en Google Drive
+    sh = gc.open("BITACORA HOGAR")
 
-st.subheader(f" Tabla de Gastos - {mes_seleccionado}")
-st.info("💡 Edita los valores de 'Gasto Real' directamente en la tabla y presiona 'Guardar Cambios'.")
+    meses = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ]
+    mes_seleccionado = st.selectbox("Selecciona el Mes:", meses)
 
-# Editor interactivo de tabla
-df_editado = st.data_editor(
-    df_actual,
-    use_container_width=True,
-    num_rows="dynamic", # Permite agregar nuevas filas desde la interfaz
-    column_config={
-        "Descripcion": st.column_config.TextColumn("Descripción", required=True),
-        "Presupuesto contemplado": st.column_config.NumberColumn("Presupuesto ($)", format="$ %.0f"),
-        "Gasto Real": st.column_config.NumberColumn("Gasto Real ($)", format="$ %.0f")
-    }
-)
+    worksheet = sh.worksheet(mes_seleccionado)
 
-# Botón para guardar todos los cambios
-if st.button(" Guardar Cambios en Excel", type="primary"):
-    try:
-        # Calcular/Actualizar columnas si se requiere
-        if os.path.exists(EXCEL_FILE):
-            with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-                df_editado.to_excel(writer, sheet_name=mes_seleccionado, index=False)
-        else:
-            with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-                df_editado.to_excel(writer, sheet_name=mes_seleccionado, index=False)
-        st.success(f"¡Cambios de {mes_seleccionado} guardados correctamente!")
-    except Exception as e:
-        st.error(f"No se pudo guardar. Si tienes el archivo Excel abierto en tu computadora, ciérralo e intenta de nuevo. Error: {e}")
+    # Leer todos los datos de la pestaña
+    data = worksheet.get_all_values()
+
+    # Mapeo de filas 3 a 15 (índices 2 a 14 en lista Python)
+    items = []
+    for r in range(2, 15):
+        if r < len(data):
+            desc = data[r][1] if len(data[r]) > 1 else "" # Columna B
+            presupuesto_str = data[r][3] if len(data[r]) > 3 else "0" # Columna D
+            gasto_real_str = data[r][5] if len(data[r]) > 5 else "0" # Columna F
+
+            # Limpiar formatos de texto/moneda
+            def parse_monto(val):
+                if not val:
+                    return 0.0
+                val_clean = str(val).replace("$", "").replace(".", "").replace(",", ".").strip()
+                try:
+                    return float(val_clean)
+                except ValueError:
+                    return 0.0
+
+            if desc and desc.strip():
+                items.append({
+                    "Fila_Sheet": r + 1, # Número de fila en Google Sheets
+                    "Descripción": desc.strip(),
+                    "Presupuesto contemplado": parse_monto(presupuesto_str),
+                    "Gasto Real": parse_monto(gasto_real_str)
+                })
+
+    df_gastos = pd.DataFrame(items)
+
+    st.subheader(f"📋 Gastos de {mes_seleccionado}")
+
+    # Tabla interactiva
+    df_editado = st.data_editor(
+        df_gastos[["Descripción", "Presupuesto contemplado", "Gasto Real"]],
+        use_container_width=True,
+        disabled=["Descripción", "Presupuesto contemplado"],
+        column_config={
+            "Descripción": st.column_config.TextColumn("Descripción"),
+            "Presupuesto contemplado": st.column_config.NumberColumn("Presupuesto ($)", format="$ %.0f"),
+            "Gasto Real": st.column_config.NumberColumn("Gasto Real ($)", format="$ %.0f")
+        }
+    )
+
+    if st.button("💾 Guardar en Google Sheets", type="primary"):
+        with st.spinner("Guardando cambios..."):
+            # Actualiza únicamente la columna F (Gasto Real) en Google Sheets
+            for idx, row in df_editado.iterrows():
+                fila_real = int(df_gastos.loc[idx, "Fila_Sheet"])
+                nuevo_valor = float(row["Gasto Real"])
+                worksheet.update_cell(fila_real, 6, nuevo_valor) # Columna 6 = F
+
+        st.success(f"¡Gastos de {mes_seleccionado} actualizados correctamente en Google Sheets!")
+
+except Exception as e:
+    st.error(f"Error al conectar con Google Sheets: {e}")
+    st.info("Asegúrate de haber configurado las credenciales en 'Secrets' dentro de Streamlit Cloud.")
