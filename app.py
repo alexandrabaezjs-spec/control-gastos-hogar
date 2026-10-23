@@ -32,53 +32,68 @@ try:
 
     worksheet = sh.worksheet(mes_seleccionado)
 
-    # Obtenemos todos los datos puros sin formato de texto
+    # Obtenemos todos los datos puros sin formatos
     data = worksheet.get_all_values(value_render_option="UNFORMATTED_VALUE")
 
     items = []
-    # En tu Excel, los ítems de gasto van exactamente de la fila 4 a la 15
-    # (En índices de lista Python es de r = 3 hasta r = 14)
-    for r in range(3, 15):
+    
+    # Función para convertir valores numéricos de forma limpia
+    def parse_num(val):
+        if val is None or val == "" or str(val).strip() == "":
+            return None
+        if isinstance(val, (int, float)):
+            return float(val)
+        val_str = str(val).replace("$", "").replace(" ", "").replace(".", "").replace(",", ".").strip()
+        try:
+            return float(val_str)
+        except ValueError:
+            return None
+
+    # Recorremos desde la fila 2 (Balance Casa) hasta la fila 15 en Google Sheets
+    # En índice Python es de r = 1 hasta r = 14
+    for r in range(1, 15):
         if r < len(data):
-            desc = data[r][1] if len(data[r]) > 1 else "" # Columna B (Descripción)
-            presupuesto_val = data[r][3] if len(data[r]) > 3 else 0 # Columna D (Presupuesto)
-            gasto_real_val = data[r][5] if len(data[r]) > 5 else 0 # Columna F (Gasto Real)
+            mes_txt = data[r][0] if len(data[r]) > 0 else "" # Columna A
+            desc_txt = data[r][1] if len(data[r]) > 1 else "" # Columna B
+            ingresos_val = parse_num(data[r][2]) if len(data[r]) > 2 else None # Columna C
+            presupuesto_val = parse_num(data[r][3]) if len(data[r]) > 3 else None # Columna D
+            restante_val = parse_num(data[r][4]) if len(data[r]) > 4 else None # Columna E
+            gasto_real_val = parse_num(data[r][5]) if len(data[r]) > 5 else None # Columna F
+            restante_real_val = parse_num(data[r][6]) if len(data[r]) > 6 else None # Columna G
 
-            def convertir_a_numero(val):
-                if val is None or val == "":
-                    return 0.0
-                if isinstance(val, (int, float)):
-                    return float(val)
-                # Si llega formateado como texto
-                val_str = str(val).replace("$", "").replace(" ", "").replace(".", "").replace(",", ".").strip()
-                try:
-                    return float(val_str)
-                except ValueError:
-                    return 0.0
-
-            # Solo agregar si la celda de descripción no está vacía
-            if desc and str(desc).strip():
+            # Incluir si hay descripción en Columna B
+            if desc_txt and str(desc_txt).strip():
                 items.append({
-                    "Fila_Sheet": r + 1, # Guarda el número de fila exacto en Sheets (4, 5, 6...)
-                    "Descripción": str(desc).strip(),
-                    "Presupuesto contemplado": convertir_a_numero(presupuesto_val),
-                    "Gasto Real": convertir_a_numero(gasto_real_val)
+                    "Fila_Sheet": r + 1, # Guarda número de fila en Sheets (2, 3, 4...)
+                    "Mes": str(mes_txt).strip() if mes_txt else "",
+                    "Descripción": str(desc_txt).strip(),
+                    "Ingresos ($)": ingresos_val,
+                    "Presupuesto ($)": presupuesto_val,
+                    "Restante ($)": restante_val,
+                    "Gasto Real ($)": gasto_real_val,
+                    "Restante Real ($)": restante_real_val
                 })
 
     df_gastos = pd.DataFrame(items)
 
-    st.subheader(f"📋 Gastos de {mes_seleccionado}")
+    st.subheader(f"Tabla de Gastos - {mes_seleccionado}")
+    st.info("💡 Edita los valores de 'Gasto Real ($)' directamente en la tabla y presiona 'Guardar en Google Sheets'.")
 
     if not df_gastos.empty:
-        # Tabla interactiva con columnas bien distribuidas
-    # Tabla interactiva con anchos de columna fijos
+        # Tabla interactiva con todas las columnas señaladas
         df_editado = st.data_editor(
-            df_gastos[["Descripción", "Presupuesto contemplado", "Gasto Real"]],
-            disabled=["Descripción", "Presupuesto contemplado"],
+            df_gastos[["Mes", "Descripción", "Ingresos ($)", "Presupuesto ($)", "Restante ($)", "Gasto Real ($)", "Restante Real ($)"]],
+            use_container_width=True,
+            # Bloqueamos todas las columnas excepto "Gasto Real ($)"
+            disabled=["Mes", "Descripción", "Ingresos ($)", "Presupuesto ($)", "Restante ($)", "Restante Real ($)"],
             column_config={
-                "Descripción": st.column_config.TextColumn("Descripción", width=250),
-                "Presupuesto contemplado": st.column_config.NumberColumn("Presupuesto ($)", format="$ %.0f", width=180),
-                "Gasto Real": st.column_config.NumberColumn("Gasto Real ($)", format="$ %.0f", width=180)
+                "Mes": st.column_config.TextColumn("Mes", width="small"),
+                "Descripción": st.column_config.TextColumn("Descripción", width="medium"),
+                "Ingresos ($)": st.column_config.NumberColumn("Ingresos ($)", format="$ %.0f", width="small"),
+                "Presupuesto ($)": st.column_config.NumberColumn("Presupuesto ($)", format="$ %.0f", width="small"),
+                "Restante ($)": st.column_config.NumberColumn("Restante ($)", format="$ %.0f", width="small"),
+                "Gasto Real ($)": st.column_config.NumberColumn("Gasto Real ($)", format="$ %.0f", width="small"),
+                "Restante Real ($)": st.column_config.NumberColumn("Restante Real ($)", format="$ %.0f", width="small"),
             },
             hide_index=True
         )
@@ -87,13 +102,19 @@ try:
             with st.spinner("Guardando cambios en Google Sheets..."):
                 for idx, row in df_editado.iterrows():
                     fila_real = int(df_gastos.loc[idx, "Fila_Sheet"])
-                    nuevo_valor = float(row["Gasto Real"])
-                    # Actualiza la celda exacta en la Columna F (6)
-                    worksheet.update_cell(fila_real, 6, nuevo_valor)
+                    
+                    # Evitamos sobreescribir la celda F2 (que es la fórmula de suma total del Balance)
+                    if fila_real == 2:
+                        continue
 
-            st.success(f"¡Gastos de {mes_seleccionado} guardados correctamente en Google Sheets!")
+                    nuevo_valor = row["Gasto Real ($)"]
+                    if pd.notnull(nuevo_valor):
+                        worksheet.update_cell(fila_real, 6, float(nuevo_valor)) # Columna 6 = F
+
+            st.success(f"¡Gastos de {mes_seleccionado} actualizados correctamente en Google Sheets!")
+            st.rerun()
     else:
-        st.info(f"No se encontraron conceptos de gastos en el mes de {mes_seleccionado}.")
+        st.warning(f"No se encontraron registros en el mes de {mes_seleccionado}.")
 
 except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
