@@ -77,7 +77,7 @@ try:
     df_gastos = pd.DataFrame(items)
 
     st.subheader(f"Tabla de Gastos - {mes_seleccionado}")
-    st.info("💡 Edita los valores de 'Gasto Real ($)' directamente en la tabla y presiona 'Guardar en Google Sheets'.")
+    st.info("💡 Edita'Gasto Real ($) 'Guardar en Google Sheets'.")
 
     if not df_gastos.empty:
         # Tabla interactiva con todas las columnas señaladas
